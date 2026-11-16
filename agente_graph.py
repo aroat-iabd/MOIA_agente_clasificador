@@ -1,4 +1,5 @@
 import os
+import sys
 import asyncio
 from typing import Literal
 from dotenv import load_dotenv  # <-- Cargar variables del .env
@@ -8,8 +9,8 @@ load_dotenv()
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
-from langgraph.prebuilt.chat_agent_executor import create_react_agent
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 
 from mcp import ClientSession, StdioServerParameters
@@ -18,12 +19,12 @@ from mcp.client.stdio import stdio_client
 # ==========================================
 # 1. FUNCIÓN OBLIGATORIA: Selección de LLM
 # ==========================================
-def get_llm(provider: Literal["gemini", "ollama"] = "gemini", model_name: str = "gemini-1.5-flash"):
+def get_llm(provider: Literal["gemini", "ollama"] = "gemini", model_name: str = "gemini-2.5-flash"):
     """
     Fábrica de LLM para intercambiar modelos rápidamente entre Gemini y Ollama local.
     """
     if provider == "gemini":
-        return ChatGoogleGenerativeAI(model=model_name, temperature=0.0)
+        return ChatGoogleGenerativeAI(model=model_name, temperature=0.0, api_key=os.getenv("GEMINI_API_KEY"))
     elif provider == "ollama":
         return ChatOllama(model=model_name, temperature=0.0)
     else:
@@ -39,22 +40,28 @@ SIEMPRE debes ejecutar las herramientas reales para interactuar con el sistema d
 
 Lista de temas prefijados: {', '.join(TEMAS)}.
 
-Instrucciones de clasificación:
-1. Revisa qué archivos hay en la carpeta de recepción ejecutando 'list_recepcion_files'.
-2. Para cada archivo encontrado, lee su contenido con 'read_file_content'.
-3. Clasifica el archivo basándote EXCLUSIVAMENTE en su contenido y asigna un tema de la lista de temas prefijados.
-4. Mueve el archivo ejecutando 'move_and_classify_file'.
+Qué hacer según lo que pida el usuario:
+- Si pide subir/copiar un archivo: usa 'upload_file'. No lo clasifiques salvo que lo pida.
+- Si te da un texto para guardarlo como archivo: usa 'create_file_from_text' (si no da nombre, usa uno corto terminado en .txt). No lo clasifiques salvo que lo pida.
+- Si pide clasificar u organizar archivos:
+  1. Ejecuta 'list_recepcion_files'.
+  2. Para cada archivo, léelo con 'read_file_content'.
+  3. Decide el tema basándote EXCLUSIVAMENTE en su contenido, eligiendo uno de la lista de temas.
+  4. Muévelo con 'move_and_classify_file'.
+- Si pide ver los archivos de un tema: usa 'list_files_by_topic'.
 """
 
 # ==========================================
 # 3. CONEXIÓN MCP Y EJECUCIÓN DEL GRAFO
 # ==========================================
 async def main():
-    # Cambia 'provider="ollama"' y 'model_name="llama3.1"' si deseas probar localmente
-    llm = get_llm(provider="gemini", model_name="gemini-1.5-flash")
+    # Cambia 'LLM_PROVIDER' y 'LLM_MODEL' en el archivo .env para alternar entre Gemini y Ollama, y entre modelos.
+    provider = os.getenv("LLM_PROVIDER", "gemini")
+    default_model = "gemini-2.5-flash" if provider == "gemini" else "llama3.1"
+    llm = get_llm(provider=provider, model_name=os.getenv("LLM_MODEL", default_model))
 
     server_params = StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=["mcp_server.py"]
     )
 
@@ -110,33 +117,33 @@ async def main():
             ]
 
             # Construcción del grafo ReAct
-            agent_executor = create_react_agent(llm, tools)
+            agent_executor = create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
 
             print("\n--- Agente Listo ---")
             print("Escribe 'salir' para terminar el chat.\n")
+
+            history = []  # aquí se guarda toda la conversación
 
             while True:
                 user_input = input("Usuario: ")
                 if user_input.lower() in ['salir', 'exit', 'quit']:
                     break
 
-                inputs = {
-                    "messages": [
-                        SystemMessage(content=SYSTEM_PROMPT),
-                        HumanMessage(content=user_input)
-                    ]
-                }
+                history.append(HumanMessage(content=user_input))
 
                 print("Agente pensando (ejecutando grafo)...")
-                async for chunk in agent_executor.astream(inputs, stream_mode="values"):
+                async for chunk in agent_executor.astream({"messages": history}, stream_mode="values"):
                     last_message = chunk["messages"][-1]
                     if last_message.type == "ai" and not last_message.tool_calls:
                         print(f"Agente: {last_message.content}")
+                    # el último chunk trae la conversación completa; la guardamos
+                    history = chunk["messages"]
+
 
 if __name__ == "__main__":
     # Preparación de la carpeta de descargas y archivos de prueba mínimos
     os.makedirs("./descargas", exist_ok=True)
-    
+
     archivos_prueba = {
         "prueba_tech.txt": "python java código",
         "prueba_deportes.txt": "fútbol baloncesto gol",
