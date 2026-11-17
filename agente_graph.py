@@ -24,7 +24,7 @@ def get_llm(provider: Literal["gemini", "ollama"] = "gemini", model_name: str = 
     Fábrica de LLM para intercambiar modelos rápidamente entre Gemini y Ollama local.
     """
     if provider == "gemini":
-        return ChatGoogleGenerativeAI(model=model_name, temperature=0.0, api_key=os.getenv("GEMINI_API_KEY"))
+        return ChatGoogleGenerativeAI(model=model_name, api_key=os.getenv("GEMINI_API_KEY"))
     elif provider == "ollama":
         return ChatOllama(model=model_name, temperature=0.0)
     else:
@@ -50,6 +50,16 @@ Qué hacer según lo que pida el usuario:
   4. Muévelo con 'move_and_classify_file'.
 - Si pide ver los archivos de un tema: usa 'list_files_by_topic'.
 """
+
+def extraer_texto(content) -> str:
+    """Devuelve solo el texto de la respuesta, sea str o lista de bloques."""
+    if isinstance(content, str):
+        return content
+    return "".join(
+        bloque.get("text", "")
+        for bloque in content
+        if isinstance(bloque, dict) and bloque.get("type") == "text"
+    )
 
 # ==========================================
 # 3. CONEXIÓN MCP Y EJECUCIÓN DEL GRAFO
@@ -135,7 +145,7 @@ async def main():
                 async for chunk in agent_executor.astream({"messages": history}, stream_mode="values"):
                     last_message = chunk["messages"][-1]
                     if last_message.type == "ai" and not last_message.tool_calls:
-                        print(f"Agente: {last_message.content}")
+                        print(f"Agente: {extraer_texto(last_message.content)}")
                     # el último chunk trae la conversación completa; la guardamos
                     history = chunk["messages"]
 
