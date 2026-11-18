@@ -67,7 +67,7 @@ def extraer_texto(content) -> str:
 async def main():
     # Cambia 'LLM_PROVIDER' y 'LLM_MODEL' en el archivo .env para alternar entre Gemini y Ollama, y entre modelos.
     provider = os.getenv("LLM_PROVIDER", "gemini")
-    default_model = "gemini-2.5-flash" if provider == "gemini" else "llama3.1"
+    default_model = "gemini-3.5-flash-lite" if provider == "gemini" else "llama3.1"
     llm = get_llm(provider=provider, model_name=os.getenv("LLM_MODEL", default_model))
 
     server_params = StdioServerParameters(
